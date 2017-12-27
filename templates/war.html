@@ -1,0 +1,304 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+    <title>War Card Game Flask-SocketIO Test</title>
+    <script type="text/javascript" src="//code.jquery.com/jquery-1.4.2.min.js"></script>
+    <script type="text/javascript" src="//cdnjs.cloudflare.com/ajax/libs/socket.io/1.3.5/socket.io.min.js"></script>
+    <script type="text/javascript" src="{{ url_for('static', filename = 'canvas_drawing.js') }}"></script>
+    <script type="text/javascript" charset="utf-8">
+        $(document).ready(function() {
+            var player_id = null;
+            var cur_msg = null;
+
+            // Use a "/test" namespace.
+            // An application can open a connection on multiple namespaces, and
+            // Socket.IO will multiplex all those connections on a single
+            // physical channel. If you don't care about multiple channels, you
+            // can set the namespace to an empty string.
+            namespace = '/test';
+
+            // Connect to the Socket.IO server.
+            // The connection URL has the following format:
+            //     http[s]://<domain>:<port>[/<namespace>]
+            var socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port + namespace);
+
+            // Event handler for new connections.
+            // The callback function is invoked when a connection with the
+            // server is established.
+            socket.on('connect', function() {
+                socket.emit('my_event', {data: 'I\'m connected!'});
+            });
+
+            // Event handler for server sent data.
+            // The callback function is invoked whenever the server emits data
+            // to the client. The data is then displayed in the "Received"
+            // section of the page.
+            socket.on('my_response', function(msg) {
+                console.log("my response");
+                console.log(msg);
+                cur_msg = msg;
+                switch (msg.data.action) {
+                    case "connect":
+                        connect_ack(msg);
+                        break;
+                    case "start_game":
+                        start_game(msg);
+                        break;
+                    case "draw_card":
+                        draw_card(msg);
+                        break;
+                    case "continue_game":
+                        continue_game(msg);
+                        break;
+                    case "reinforce_battle":
+                        reinforce_battle(msg);
+                        break;
+                    case "restart":
+                        restart_game(msg);
+                    default:
+                        display_message(msg.count, msg.data.message);
+                }
+
+            });
+
+            // Interval function that tests message latency by sending a "ping"
+            // message. The server then responds with a "pong" message and the
+            // round trip time is measured.
+            var ping_pong_times = [];
+            var start_time;
+            window.setInterval(function() {
+                start_time = (new Date).getTime();
+                socket.emit('my_ping');
+            }, 1000);
+
+            // Handler for the "pong" message. When the pong is received, the
+            // time from the ping is stored, and the average of the last 30
+            // samples is average and displayed.
+            socket.on('my_pong', function() {
+                var latency = (new Date).getTime() - start_time;
+                ping_pong_times.push(latency);
+                ping_pong_times = ping_pong_times.slice(-30); // keep last 30 samples
+                var sum = 0;
+                for (var i = 0; i < ping_pong_times.length; i++)
+                    sum += ping_pong_times[i];
+                $('#ping-pong').text(Math.round(10 * sum / ping_pong_times.length) / 10);
+            });
+
+            // Handlers for the different forms in the page.
+            // These accept data from the user and send it to the server in a
+            // variety of ways
+            // $('form#emit').submit(function(event) {
+            //     socket.emit('my_event', {data: $('#emit_data').val()});
+            //     return false;
+            // });
+            $('form#broadcast').submit(function(event) {
+                socket.emit('my_broadcast_event', {data: {action: "chat", message: $('#broadcast_data').val()}});
+                return false;
+            });
+            $('form#start').submit(function(event) {
+                socket.emit('my_broadcast_event', {data: {action: "start_game"}});
+                return false;
+            });
+            $('form#draw').submit(function(event) {
+                socket.emit('my_broadcast_event', {data: {action: "draw_card"}});
+                return false;
+            });
+            $('form#continue').submit(function(event) {
+                socket.emit('my_broadcast_event', {data: {action: "continue_game"}});
+                return false;
+            });
+            $('form#reinforce').submit(function(event) {
+                socket.emit('my_broadcast_event', {data: {action: "reinforce_battle"}});
+                return false;
+            });
+            $('form#restart').submit(function(event) {
+                socket.emit('my_broadcast_event', {data: {action: "restart"}});
+                return false;
+            });
+            // $('form#join').submit(function(event) {
+            //     socket.emit('join', {room: $('#join_room').val()});
+            //     return false;
+            // });
+            // $('form#leave').submit(function(event) {
+            //     socket.emit('leave', {room: $('#leave_room').val()});
+            //     return false;
+            // });
+            // $('form#send_room').submit(function(event) {
+            //     socket.emit('my_room_event', {room: $('#room_name').val(), data: $('#room_data').val()});
+            //     return false;
+            // });
+            // $('form#close').submit(function(event) {
+            //     socket.emit('close_room', {room: $('#close_room').val()});
+            //     return false;
+            // });
+            $('form#disconnect').submit(function(event) {
+                socket.emit('disconnect_request');
+                return false;
+            });
+
+            function display_state(msg) {
+                console.log(msg.war_state);
+                // display_message(msg.count, JSON.stringify(msg.war_state));
+                
+                render_state(player_id, msg.war_state);
+            
+                // if (msg.war_state.constructor === Array) {
+                //     render_state(player_id, msg.state[0]);
+                //     console.log("continue?")
+                //     if (msg.state.length > 1) {
+                //         msg.state.shift();
+                //         $("#draw").hide();
+                //         $("#continue").show();
+                //     } else {
+                //         $("#continue").hide();
+                //     }
+                // } else {
+                //     render_state(player_id, msg.war_state);
+                // }
+            }
+
+            function display_message(count, msg) {
+                $('#log').prepend('<br>' + $('<div/>').text('Received #' + count + ': ' + msg).html());
+            }
+
+            function connect_ack(msg) {
+                player_id = msg.data.player_id;
+                display_message(msg.count, msg.data.message);
+            }
+
+            function start_game(msg) {
+                if (msg.war_state.state == "Lobby") {
+                    // Not enough players to start a game
+                    message = "Not enough players to start a game";
+                    display_message(msg.count, message);
+                    return;
+                }
+                $('#draw').show();
+                $('#start').hide();
+
+                display_state(msg);
+            }
+            function draw_card(msg) {
+                if (msg.war_state.state == "Preparation") {
+                    // Not enough players have drawn
+                    message = "Not all players have drawn";
+                    display_message(msg.count, message);
+
+                    // If I've drawn, hide the draw button
+                    if (player_id in msg.war_state.drawn_cards) {
+                        $("#draw").hide();
+                    }
+                } else if (msg.war_state.state == "Afterbattle") {
+                    $("#draw").hide();
+                    $("#continue").show();
+                } else if (msg.war_state.state == "Conclusion") {
+                    $("#draw").hide();
+                    $("#restart").show();
+                }
+
+                display_state(msg);
+            }
+            function continue_game(msg) {
+                console.log("into continue_game");
+                if (msg.war_state.state == "Afterbattle") {
+                    // Not enough players have clicked continue
+                    message = "Not all players have continued";
+                    display_message(msg.count, message);
+
+                    // If I've continued, hide the continue button
+                    if (msg.war_state.continue_game.indexOf(player_id) != -1) {
+                        $("#continue").hide();
+                    }
+                } else if (msg.war_state.state == "Preparation") {
+                    $("#draw").show();
+                    $("#continue").hide();
+                } else if (msg.war_state.state == "Reinforcements") {
+                    $("#reinforce").show();
+                    $("#continue").hide();
+                }
+                display_state(msg);
+            }
+            function reinforce_battle(msg) {
+                if (msg.war_state.state == "Reinforcements") {
+                    // Not enough players have reinforced
+                    message = "Not all players have reinforced";
+                    display_message(msg.count, message);
+
+                    // If I've reinforced, hide the reinforce button
+                    if (player_id in msg.war_state.drawn_cards) {
+                        $("#reinforce").hide();
+                    }
+                } else if (msg.war_state.state == "Preparation") {
+                    $("#reinforce").hide();
+                    $("#draw").show();
+                } else if (msg.war_state.state == "Conclusion") {
+                    $("#draw").hide();
+                    $("#restart").show();
+                }
+                display_state(msg);
+            }
+            function restart_game(msg) {
+                $("#start").show();
+                $('#draw').hide();
+                $('#continue').hide();
+                $('#reinforce').hide();
+                $('#restart').hide();
+            }
+
+            restart_game();
+        });
+    </script>
+</head>
+<body>
+    <h1>War Card Game Flask-SocketIO Test</h1>
+    <p>Async mode is: <b>{{ async_mode }}</b></p>
+    <p>Average ping/pong latency: <b><span id="ping-pong"></span>ms</b></p>
+    <canvas id="tableCanvas" width="600" height="400" style="border:1px solid #000000;"></canvas>
+    <h2>Send:</h2>
+    <form id="start" method="POST" action='#'>
+        <input type="submit" value="Start">
+    </form>
+    <form id="draw" method="POST" action='#'>
+        <input type="submit" value="Draw">
+    </form>
+    <form id="continue" method="POST" action='#'>
+        <input type="submit" value="Continue">
+    </form>
+    <form id="reinforce" method="POST" action='#'>
+        <input type="submit" value="Reinforce">
+    </form>
+    <form id="restart" method="POST" action='#'>
+        <input type="submit" value="Restart">
+    </form>
+    <!-- <form id="emit" method="POST" action='#'>
+        <input type="text" name="emit_data" id="emit_data" placeholder="Message">
+        <input type="submit" value="Echo">
+    </form> -->
+    <form id="broadcast" method="POST" action='#'>
+        <input type="text" name="broadcast_data" id="broadcast_data" placeholder="Message">
+        <input type="submit" value="Broadcast">
+    </form>
+    <!-- <form id="join" method="POST" action='#'>
+        <input type="text" name="join_room" id="join_room" placeholder="Room Name">
+        <input type="submit" value="Join Room">
+    </form>
+    <form id="leave" method="POST" action='#'>
+        <input type="text" name="leave_room" id="leave_room" placeholder="Room Name">
+        <input type="submit" value="Leave Room">
+    </form>
+    <form id="send_room" method="POST" action='#'>
+        <input type="text" name="room_name" id="room_name" placeholder="Room Name">
+        <input type="text" name="room_data" id="room_data" placeholder="Message">
+        <input type="submit" value="Send to Room">
+    </form>
+    <form id="close" method="POST" action="#">
+        <input type="text" name="close_room" id="close_room" placeholder="Room Name">
+        <input type="submit" value="Close Room">
+    </form> -->
+    <form id="disconnect" method="POST" action="#">
+        <input type="submit" value="Disconnect">
+    </form>
+    <h2>Receive:</h2>
+    <div id="log"></div>
+</body>
+</html>
